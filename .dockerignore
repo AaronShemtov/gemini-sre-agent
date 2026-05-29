@@ -1,0 +1,8 @@
+.git
+.github
+k8s
+README.md
+**/__pycache__
+*.pyc
+.venv
+.env

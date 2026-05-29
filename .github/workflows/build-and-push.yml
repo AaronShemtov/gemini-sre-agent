@@ -1,0 +1,126 @@
+name: build-and-push
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to OCIR
+        uses: docker/login-action@v3
+        with:
+          registry: il-jerusalem-1.ocir.io
+          username: axiwhc5fgu9i/shemtov.aaron@gmail.com
+          password: ${{ secrets.OCIR_AUTH_TOKEN }}
+
+      # We tag the image three ways:
+      #   - 0.0.<run_number> — auto-incrementing semver used by Flux ImagePolicy.
+      #     github.run_number monotonically increases per workflow file, so each
+      #     successful build gets a strictly higher version than the previous.
+      #   - <short-sha>       — immutable for traceability / ad-hoc rollback.
+      #   - latest            — convenience for ad-hoc pulls; never used in k8s.
+      - name: Resolve image tags
+        id: tag
+        run: |
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "ver=0.0.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: |
+            il-jerusalem-1.ocir.io/axiwhc5fgu9i/gemini-sre-agent:${{ steps.tag.outputs.ver }}
+            il-jerusalem-1.ocir.io/axiwhc5fgu9i/gemini-sre-agent:${{ steps.tag.outputs.sha }}
+            il-jerusalem-1.ocir.io/axiwhc5fgu9i/gemini-sre-agent:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          echo "### Image pushed :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Version tag (used by Flux): \`${{ steps.tag.outputs.ver }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- SHA tag (traceability):     \`${{ steps.tag.outputs.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Convenience tag:            \`latest\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify Telegram — success
+        if: success()
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT:  ${{ secrets.TELEGRAM_CHAT_ID }}
+          REPO:     ${{ github.repository }}
+          SHA:      ${{ steps.tag.outputs.sha }}
+          VER:      ${{ steps.tag.outputs.ver }}
+          ACTOR:    ${{ github.actor }}
+          RUN_URL:  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # Image name = repo basename — keeps this snippet identical
+          # across all five service repos.
+          IMAGE_NAME="${REPO##*/}"
+          IMAGE_FULL="il-jerusalem-1.ocir.io/axiwhc5fgu9i/${IMAGE_NAME}:${VER}"
+
+          # Build the message line by line — printf %s\n is the simplest
+          # way to compose multi-line text without heredoc indent traps.
+          {
+            printf '%s\n' "✅ <b>Build OK</b> · <code>${IMAGE_NAME}</code>"
+            printf '\n'
+            printf '%s\n' "<b>Image</b>: <code>${IMAGE_FULL}</code>"
+            printf '%s\n' "<b>SHA</b>: <code>${SHA}</code>"
+            printf '%s\n' "<b>By</b>: ${ACTOR}"
+            printf '%s\n' "<a href=\"${RUN_URL}\">workflow run</a>"
+          } > /tmp/tg-msg.txt
+
+          curl -sS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TG_CHAT}" \
+            --data-urlencode "text@/tmp/tg-msg.txt" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "disable_web_page_preview=true" \
+            -o /dev/null
+
+      - name: Notify Telegram — failure
+        if: failure()
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT:  ${{ secrets.TELEGRAM_CHAT_ID }}
+          REPO:     ${{ github.repository }}
+          ACTOR:    ${{ github.actor }}
+          RUN_URL:  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          IMAGE_NAME="${REPO##*/}"
+
+          {
+            printf '%s\n' "❌ <b>Build FAILED</b> · <code>${IMAGE_NAME}</code>"
+            printf '\n'
+            printf '%s\n' "<b>By</b>: ${ACTOR}"
+            printf '%s\n' "<a href=\"${RUN_URL}\">workflow run · check logs</a>"
+          } > /tmp/tg-msg.txt
+
+          curl -sS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TG_CHAT}" \
+            --data-urlencode "text@/tmp/tg-msg.txt" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "disable_web_page_preview=true" \
+            -o /dev/null

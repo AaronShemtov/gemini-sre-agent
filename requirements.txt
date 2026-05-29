@@ -1,0 +1,8 @@
+# Pinned dependencies for the AI SRE agent.
+# Versions chosen as recent stable as of mid-2026; bump deliberately.
+
+langgraph==0.2.45
+langchain-core==0.3.40
+google-generativeai==0.8.3
+kubernetes==31.0.0
+python-telegram-bot==21.9
