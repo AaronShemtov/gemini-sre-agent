@@ -28,6 +28,8 @@ State is a plain dict (TypedDict). We keep `collected` as a growing list of
 from __future__ import annotations
 
 import json
+import time
+import logging
 from typing import Any, Optional, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -35,6 +37,7 @@ from langgraph.graph import END, StateGraph
 from app.graph import llm
 from app.tools.registry import REGISTRY
 
+logger = logging.getLogger(__name__)
 
 class AgentState(TypedDict, total=False):
     question: str
@@ -89,6 +92,8 @@ def _collected_text(collected: list[dict]) -> str:
 def node_plan(state: AgentState) -> AgentState:
     from app.k8s import client as k8s
     namespaces = k8s.list_namespaces()
+    
+    # We do not sleep on the first node to provide immediate initial feedback
     plan = llm.plan_investigation(state["question"], namespaces)
     ns = plan.get("namespace") or (namespaces[0] if namespaces else "default")
     collected: list[dict] = []
@@ -98,6 +103,11 @@ def node_plan(state: AgentState) -> AgentState:
 
 def node_replan(state: AgentState) -> AgentState:
     collected = state["collected"]
+    
+    # Artificial delay to ensure we stay under the 5 RPM Free Tier limit
+    logger.info("Pacing API calls: sleeping 12s before replanning...")
+    time.sleep(12)
+    
     decision = llm.replan(_collected_text(collected))
     if not decision.get("enough", False):
         _run_calls(decision.get("calls", []), state["namespace"], collected)
@@ -105,6 +115,10 @@ def node_replan(state: AgentState) -> AgentState:
 
 
 def node_analyse(state: AgentState) -> AgentState:
+    # Artificial delay to ensure we stay under the 5 RPM Free Tier limit
+    logger.info("Pacing API calls: sleeping 12s before final analysis...")
+    time.sleep(12)
+    
     analysis = llm.analyse(state["question"], _collected_text(state["collected"]))
     proposed = analysis.get("proposed_action")
     # Validate the proposed action references a real mutating tool.

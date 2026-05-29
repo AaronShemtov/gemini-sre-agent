@@ -19,10 +19,15 @@ from __future__ import annotations
 
 import json
 import os
+import logging
 
 import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted
+from tenacity import retry, wait_exponential, retry_if_exception_type, stop_after_attempt, before_sleep_log
 
 from app.tools.registry import tool_catalog
+
+logger = logging.getLogger(__name__)
 
 _API_KEY = os.environ.get("GEMINI_API_KEY", "")
 _MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
@@ -30,6 +35,15 @@ _MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 genai.configure(api_key=_API_KEY)
 _model = genai.GenerativeModel(_MODEL)
 
+# Retry mechanism for 429 ResourceExhausted (Free Tier RPM Limits)
+# Waits 4s, then 8s, 16s, 32s, up to 5 attempts before failing.
+retry_429 = retry(
+    retry=retry_if_exception_type(ResourceExhausted),
+    wait=wait_exponential(multiplier=2, min=4, max=60),
+    stop=stop_after_attempt(5),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True
+)
 
 def _extract_json(text: str) -> dict:
     """Gemini sometimes wraps JSON in ```json fences or adds prose.
@@ -127,6 +141,7 @@ Respond with STRICT JSON only:
 """
 
 
+@retry_429
 def plan_investigation(question: str, namespaces: list[str]) -> dict:
     prompt = PLAN_SYSTEM.format(
         tools=tool_catalog(), namespaces=", ".join(namespaces)
@@ -134,13 +149,13 @@ def plan_investigation(question: str, namespaces: list[str]) -> dict:
     resp = _model.generate_content(prompt)
     return _extract_json(resp.text)
 
-
+@retry_429
 def replan(collected: str) -> dict:
     prompt = REPLAN_SYSTEM.format(collected=collected, tools=tool_catalog())
     resp = _model.generate_content(prompt)
     return _extract_json(resp.text)
 
-
+@retry_429
 def analyse(question: str, collected: str) -> dict:
     prompt = ANALYSE_SYSTEM.format(question=question, collected=collected)
     resp = _model.generate_content(prompt)
