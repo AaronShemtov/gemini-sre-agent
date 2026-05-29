@@ -8,7 +8,7 @@ cause, timeline, blast radius, evidence, and a suggested fix. When a safe
 remediation applies (rolling restart or fixing a service selector) it asks
 for your approval before touching anything.
 
-## Architecture
+## Architecture 
 
 ```
 Telegram (DM, whitelisted users)
