@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# ---- build a slim, non-root image for the agent ----
+# ---- build a slim , non-root image for the agent ----
 FROM python:3.12-slim AS base
 
 # No .pyc, unbuffered logs (so kubectl logs is live).
