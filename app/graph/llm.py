@@ -30,7 +30,7 @@ from app.tools.registry import tool_catalog
 logger = logging.getLogger(__name__)
 
 _API_KEY = os.environ.get("GEMINI_API_KEY", "")
-_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+_MODEL = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
 
 genai.configure(api_key=_API_KEY)
 _model = genai.GenerativeModel(_MODEL)
@@ -40,7 +40,7 @@ _model = genai.GenerativeModel(_MODEL)
 retry_429 = retry(
     retry=retry_if_exception_type(ResourceExhausted),
     wait=wait_exponential(multiplier=2, min=4, max=60),
-    stop=stop_after_attempt(5),
+    stop=stop_after_delay(180), # Ждем до 3 минут, пока квота восстановится
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True
 )
