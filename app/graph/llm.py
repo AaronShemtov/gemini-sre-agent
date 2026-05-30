@@ -31,7 +31,7 @@ from app.tools.registry import tool_catalog
 logger = logging.getLogger(__name__)
 
 _API_KEY = os.environ.get("GEMINI_API_KEY", "")
-_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash-lite-001")
+_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
 
 genai.configure(api_key=_API_KEY)
 _model = genai.GenerativeModel(_MODEL)
