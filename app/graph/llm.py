@@ -144,6 +144,7 @@ Respond with STRICT JSON only:
 
 @retry_429
 def plan_investigation(question: str, namespaces: list[str]) -> dict:
+    logger.info(f"📡 [Gemini API] Отправка запроса: plan_investigation")
     prompt = PLAN_SYSTEM.format(
         tools=tool_catalog(), namespaces=", ".join(namespaces)
     ) + f"\n\nUser question: {question}"
@@ -152,12 +153,14 @@ def plan_investigation(question: str, namespaces: list[str]) -> dict:
 
 @retry_429
 def replan(collected: str) -> dict:
+    logger.info(f"📡 [Gemini API] Отправка запроса: replan")
     prompt = REPLAN_SYSTEM.format(collected=collected, tools=tool_catalog())
     resp = _model.generate_content(prompt)
     return _extract_json(resp.text)
 
 @retry_429
 def analyse(question: str, collected: str) -> dict:
+    logger.info(f"📡 [Gemini API] Отправка запроса: analyse")
     prompt = ANALYSE_SYSTEM.format(question=question, collected=collected)
     resp = _model.generate_content(prompt)
     return _extract_json(resp.text)
