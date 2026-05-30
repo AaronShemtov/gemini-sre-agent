@@ -148,6 +148,7 @@ evidence clearly supports it:
       or crashes that a restart won't fix.
   - patch_service_selector(namespace, service, selector)
       use ONLY when a Service has the wrong selector and its endpoints are
+<<<<<<< HEAD
       empty because labels don't match the pods. The get_pods signal
       INCLUDES each pod's actual `labels` -- compare the Service's
       `selector` against those real pod labels. If they differ and that
@@ -156,6 +157,10 @@ evidence clearly supports it:
       "cv-frontend"}} but the service selector is {{"app": "cv-frontend-x"}},
       propose selector {{"app": "cv-frontend"}}). Do not claim the labels
       are unknown -- they are in the get_pods result.
+=======
+      empty because labels don't match the pods. Provide the corrected
+      selector that matches the actual pod labels seen in the signals.
+>>>>>>> 725dedcc077d4b8ef1f6cd038dab47d5856fb7e4
 
 If no safe action clearly applies, set proposed_action to null and explain
 the manual fix in suggested_fix instead.
