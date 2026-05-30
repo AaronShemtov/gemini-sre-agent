@@ -39,6 +39,7 @@ from telegram.ext import (
 )
 
 from app.graph.agent import GRAPH, RESUME_GRAPH
+from app.graph.llm import QuotaExceeded
 from app.telegram import render
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -74,7 +75,9 @@ async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         "• /investigate urlshortener-reader keeps restarting\n\n"
         "I gather pods, events, logs, deployment & service state, then give "
         "you an RCA. If a safe fix applies (rollout restart / service "
-        "selector), I'll ask before doing anything."
+        "selector), I'll ask before doing anything.\n\n"
+        "Note: running on the Gemini free tier (~20 investigations/day). "
+        "If I say the quota is reached, it resets daily."
     )
 
 
@@ -91,6 +94,18 @@ async def _run_investigation(update: Update, question: str) -> None:
         # block the asyncio event loop.
         import asyncio
         state = await asyncio.to_thread(GRAPH.invoke, {"question": question})
+    except QuotaExceeded as e:
+        # Daily free-tier quota hit — this won't clear in seconds, so give
+        # a clear message rather than a stack trace and pointless waiting.
+        when = f" Try again in ~{e.retry_seconds}s." if e.retry_seconds else ""
+        await update.message.reply_text(
+            "⚠️ Gemini free-tier quota reached for now.\n"
+            "The daily request limit on the free tier is small (20/day for "
+            "this model), so investigations pause once it's used up." + when +
+            "\n\nThe quota resets on Google's daily schedule. To remove the "
+            "limit entirely, enable billing on the Gemini API key."
+        )
+        return
     except Exception as e:  # noqa: BLE001
         log.exception("investigation failed")
         await update.message.reply_text(f"Investigation failed: {type(e).__name__}: {e}")
