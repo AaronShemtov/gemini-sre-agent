@@ -23,7 +23,8 @@ import logging
 
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted
-from tenacity import retry, wait_exponential, retry_if_exception_type, stop_after_attempt, before_sleep_log
+# Fixed import here: added stop_after_delay
+from tenacity import retry, wait_exponential, retry_if_exception_type, stop_after_delay, before_sleep_log
 
 from app.tools.registry import tool_catalog
 
@@ -36,11 +37,11 @@ genai.configure(api_key=_API_KEY)
 _model = genai.GenerativeModel(_MODEL)
 
 # Retry mechanism for 429 ResourceExhausted (Free Tier RPM Limits)
-# Waits 4s, then 8s, 16s, 32s, up to 5 attempts before failing.
+# Waits 4s, then 8s, 16s, 32s...
 retry_429 = retry(
     retry=retry_if_exception_type(ResourceExhausted),
     wait=wait_exponential(multiplier=2, min=4, max=60),
-    stop=stop_after_delay(180), # Ждем до 3 минут, пока квота восстановится
+    stop=stop_after_delay(180), # Wait up to 3 minutes for quota recovery
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True
 )
