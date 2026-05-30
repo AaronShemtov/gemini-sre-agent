@@ -83,6 +83,10 @@ def get_pods(namespace: str) -> list[dict[str, Any]]:
                 "restarts": restarts,
                 "node": p.spec.node_name,
                 "age": _age(p.metadata.creation_timestamp),
+                # Labels are essential for diagnosing service-selector
+                # mismatches: the agent compares these against a Service's
+                # selector to decide whether (and how) to fix it.
+                "labels": p.metadata.labels or {},
             }
         )
     return out
@@ -142,6 +146,7 @@ def describe_pod(namespace: str, pod: str) -> dict[str, Any]:
         "namespace": namespace,
         "phase": p.status.phase,
         "node": p.spec.node_name,
+        "labels": p.metadata.labels or {},
         "start_time": str(p.status.start_time) if p.status.start_time else None,
         "containers": containers,
         "container_statuses": statuses,
