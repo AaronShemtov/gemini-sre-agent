@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -43,6 +44,59 @@ from app.graph.llm import QuotaExceeded
 from app.telegram import render
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
+
+# Anything shaped like a credential, removed before a line can be written.
+#
+# This is not hypothetical. httpx logs every request at INFO as
+# "HTTP Request: POST https://api.telegram.org/bot<TOKEN>/getUpdates", and this bot long-
+# polls, so the line was written about once a second. Alloy ships it to Loki, and Loki
+# answers unauthenticated queries through a Grafana that is public on purpose — the bot
+# token was readable by anyone on the internet, and 247 lines of it were still there when
+# it was found. The token had to be revoked.
+#
+# Two measures, because one was clearly not enough: the client that logs full URLs is
+# silenced, and this filter catches whatever leaks next. Patterns match shapes rather
+# than values, so it does not need to be told the current secrets.
+_REDACTIONS = (
+    (re.compile(r"(api\.telegram\.org/bot)\d+:[A-Za-z0-9_-]+"), r"\1<REDACTED>"),
+    (re.compile(r"\b(bot)\d{6,}:[A-Za-z0-9_-]{20,}"), r"\1<REDACTED>"),
+    (re.compile(r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?bearer\s+)\S+"), r"\1<REDACTED>"),
+    (re.compile(r"(?i)((?:api[-_]?key|x-goog-api-key)[\"']?\s*[:=]\s*[\"']?)[^\s\"',}]+"),
+     r"\1<REDACTED>"),
+    (re.compile(r"(://[^/\s:@]+:)[^/\s@]+(@)"), r"\1<REDACTED>\2"),
+)
+
+
+class _SecretRedactionFilter(logging.Filter):
+    """Rewrite a record so no credential reaches a handler.
+
+    Installed on the handlers rather than on the root logger deliberately: a filter on a
+    logger only sees records logged through that logger, so records propagating up from
+    httpx would never pass it. Handler filters see everything the handler writes.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:  # a broken format string must not lose the line entirely
+            return True
+        cleaned = message
+        for pattern, replacement in _REDACTIONS:
+            cleaned = pattern.sub(replacement, cleaned)
+        if cleaned != message:
+            record.msg = cleaned
+            record.args = ()
+        return True
+
+
+# The source first: these log the full request URL, token and all.
+for _noisy in ("httpx", "httpcore", "telegram.request", "google_genai", "urllib3"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
+for _handler in logging.getLogger().handlers:
+    _handler.addFilter(_SecretRedactionFilter())
+
 log = logging.getLogger("ai-sre-agent")
 
 _TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
