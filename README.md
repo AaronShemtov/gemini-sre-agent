@@ -8,7 +8,10 @@ cause, timeline, blast radius, evidence, and a suggested fix. When a safe
 remediation applies (rolling restart or fixing a service selector) it asks
 for your approval before touching anything.
 
-## Architecture 
+The project is provider-neutral at the product level. Gemini is the current
+LLM provider and can be replaced or complemented by other providers later.
+
+## Architecture
 
 ```
 Telegram (DM, whitelisted users)
@@ -18,24 +21,22 @@ Telegram (DM, whitelisted users)
         │
         ▼
    LangGraph agent
-   plan → collect → replan → collect → analyse → (propose action)
-        │                                              │ approved
-        │ read-only K8s API                            ▼
-        ▼                                     execute → verify
+   gather → analyse → (propose action)
+        │                         │ approved
+        │ read-only K8s API       ▼
+        ▼                  execute → verify
    Kubernetes API (in-cluster ServiceAccount, RBAC-scoped)
         │
         ▼
-   Gemini 2.0 Flash  (planning + RCA reasoning)
+   Gemini (current planning + RCA provider)
 ```
 
-- **Gemini** is the brain: it plans which signals to gather, then reasons
-  over them to produce the RCA. Two planning rounds (broad discovery, then
-  targeted drill-down on the specific failing pod) keep token usage low.
+- **Gemini** is the current brain: it reasons over collected signals to
+  produce the RCA. The provider-specific `GEMINI_*` settings remain explicit.
 - **Kubernetes API** is the hands: a tightly RBAC-scoped ServiceAccount.
   Broad **read**, almost no **write**.
 - **LangGraph** is the nervous system: a deterministic graph so we control
-  exactly which cluster calls happen — the LLM proposes, the graph
-  disposes.
+  exactly which cluster calls happen — the LLM proposes, the graph disposes.
 - **Telegram** is the interface, with a hard user whitelist and a human
   approval gate on every mutating action.
 
@@ -65,67 +66,55 @@ Safe write (approval-gated): `rollout_restart`, `patch_service_selector`.
 
 ## Prerequisites
 
-Two secrets in OCI Vault:
-- `gemini-api-key` — your Google AI Studio key
-- `telegram-bot-token` — the bot token (reused from the Flux notifications
-  setup; one bot both notifies the channel and answers your DMs)
+Secrets in OCI Vault:
 
-Your Telegram numeric user ID (message `@userinfobot` to get it).
+- `gemini-api-key` — Google AI Studio key for the current provider;
+- `sre-agent-telegram-bot-token` — dedicated bot token for the agent.
+
+GitHub Actions secrets:
+
+- `OCIR_AUTH_TOKEN`;
+- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` for build notifications.
+
+Create the OCIR repository `ai-sre-agent` manually in compartment `personal`
+**before the first push**. Otherwise OCIR may auto-create it in the root
+compartment, outside the expected IAM policies.
 
 ## Deploy
 
-1. **Set your Telegram user ID** in `k8s/deployment.yaml`'s ConfigMap
-   (`TELEGRAM_ALLOWED_USERS`). This is not a secret — it's an allow-list.
+1. Set `TELEGRAM_ALLOWED_USERS` in
+   `personal-k8s/applications/ai-sre-agent/deployment.yaml`.
+2. Merge code to `main`. GitHub Actions builds the `linux/arm64` image and
+   pushes it to `il-jerusalem-1.ocir.io/axiwhc5fgu9i/ai-sre-agent` with
+   version, short-SHA and `latest` tags.
+3. Review and merge the corresponding GitOps pull request in `personal-k8s`.
+   Flux performs the deployment; do not apply these resources manually.
+4. Verify the `ai-sre-agent` Deployment and pod in namespace `ai-sre-agent`.
 
-2. **Create the OCIR repo** `gemini-sre-agent` (first push from CI creates
-   the image; create the repo in the OCI console if your tenancy needs it
-   pre-created).
+## Usage
 
-3. **Push the code repo** — GitHub Actions builds the ARM64 image, pushes
-   to OCIR, and sends a Telegram build notification (same pipeline as the
-   other services).
+DM the configured Telegram bot, for example:
 
-4. **Add the manifests to `personal-k8s`** under
-   `infrastructure/gemini-sre-agent/` and let Flux reconcile, OR apply
-   directly:
+```
+why is cv-frontend unhealthy in namespace cv
+/investigate urlshortener-reader keeps restarting
+```
 
-   ```powershell
-   kubectl apply -f k8s/namespace.yaml
-   kubectl apply -f k8s/rbac.yaml
-   kubectl apply -f k8s/externalsecrets.yaml
-   kubectl apply -f k8s/deployment.yaml
-   ```
-
-5. **Verify**:
-
-   ```powershell
-   kubectl get pods -n ai-sre-agent
-   kubectl logs -n ai-sre-agent deploy/ai-sre-agent
-   # → "AI SRE Agent starting (long polling)…"
-   ```
-
-6. **Use it** — DM your bot:
-
-   ```
-   why is cv-frontend unhealthy in namespace cv
-   /investigate urlshortener-reader keeps restarting
-   ```
-
-## Notes / limitations (MVP)
+## Notes / limitations
 
 - Single replica by design — Telegram long polling allows only one
-  consumer per bot token (two would 409). Strategy is `Recreate`.
+  consumer per bot token (two would return 409). Strategy is `Recreate`.
 - Approval state is held in memory; if the pod restarts between proposing
-  an action and your approval, you'll be asked to re-run. Fine for a
-  single-user MVP; a durable store (or LangGraph checkpointer) is the
-  next step.
-- Logs come straight from the Kubernetes API (pod logs + previous
-  container logs). A future iteration can add Loki as a second source for
-  history beyond what's still on the node.
+  an action and approval, the investigation must be run again.
+- Logs come directly from the Kubernetes API. Loki can be added later for
+  history beyond logs retained on the node.
+- Gemini is currently the only implemented LLM provider, but it is not part
+  of the project identity.
 
 ## Roadmap
 
-- Deployment-failure debugger mode (correlate CI/CD + Helm + rollout).
+- Provider abstraction for additional hosted and local LLMs.
+- Deployment-failure debugger mode (correlate CI/CD + rollout).
 - ChatOps commands (`/status`, `/rollout-status`, `/restart`).
 - Loki + Prometheus as additional signal sources.
 - Web UI at `agent.1ms.my` reusing the same graph.
