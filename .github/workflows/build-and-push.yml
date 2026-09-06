@@ -52,9 +52,9 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: |
-            il-jerusalem-1.ocir.io/axiwhc5fgu9i/gemini-sre-agent:${{ steps.tag.outputs.ver }}
-            il-jerusalem-1.ocir.io/axiwhc5fgu9i/gemini-sre-agent:${{ steps.tag.outputs.sha }}
-            il-jerusalem-1.ocir.io/axiwhc5fgu9i/gemini-sre-agent:latest
+            il-jerusalem-1.ocir.io/axiwhc5fgu9i/ai-sre-agent:${{ steps.tag.outputs.ver }}
+            il-jerusalem-1.ocir.io/axiwhc5fgu9i/ai-sre-agent:${{ steps.tag.outputs.sha }}
+            il-jerusalem-1.ocir.io/axiwhc5fgu9i/ai-sre-agent:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
